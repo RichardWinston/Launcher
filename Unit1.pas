@@ -5,7 +5,7 @@ interface
 uses
   ShellAPI, Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
   StdCtrls, ExtCtrls, ActivApp, Buttons, Menus, DropImage, TBNArea, Registry,
-  ImgList;
+  ImgList, System.Generics.Collections;
 
 type
   TForm1 = class(TForm)
@@ -58,12 +58,13 @@ type
 //    Images : TList;
     Applications : TStringList;
     Parameters : TStringList;
+    RunAsAdministrators: TList<Boolean>;
     XOffset, YOffset : integer;
     Moving : boolean;
     Creating : boolean;
 //    procedure ButtonAClick(Sender: TObject);
 //    procedure DrawMyIcon(AFileName : String);
-    procedure AddApplication(AFileName, Parameter: string);
+    procedure AddApplication(AFileName, Parameter: string; RunAsAdministrator: Boolean);
     procedure ReassignTags;
     procedure MyUpdateRegistry;
     { Private declarations }
@@ -82,6 +83,7 @@ const LauncherKey = '\Software\Richard B. Winston\Launcher';
   ProgramsKey = 'Programs';
   ProgKey = 'Prog';
   ParamKey = 'Param';
+  RunAsAdminstratorKey = 'RunAsAdminstrator';
   DirKey = 'Directory';
   SizeKey = 'Size';
 
@@ -183,7 +185,26 @@ begin
 
 end;}
 
-procedure TForm1.AddApplication(AFileName, Parameter : string);
+
+procedure RunAsAdmin(const aFile: string; const aParameters: string = ''; Handle: HWND = 0);
+var
+  sei: TShellExecuteInfo;
+begin
+  FillChar(sei, SizeOf(sei), 0);
+
+  sei.cbSize := SizeOf(sei);
+  sei.Wnd := Handle;
+  sei.fMask := SEE_MASK_FLAG_DDEWAIT or SEE_MASK_FLAG_NO_UI;
+  sei.lpVerb := 'runas';
+  sei.lpFile := PChar(aFile);
+  sei.lpParameters := PChar(aParameters);
+  sei.nShow := SW_SHOWNORMAL;
+
+  if not ShellExecuteEx(@sei) then
+    RaiseLastOSError;
+end;
+
+procedure TForm1.AddApplication(AFileName, Parameter : string; RunAsAdministrator: Boolean);
 var
   AnotherFileDropImage : TFileDropImage;
   TheIcon: TIcon;
@@ -214,6 +235,7 @@ begin
 
   FileDropImage.Tag := Applications.AddObject(AFileName, FileDropImage);
   Parameters.Add(Parameter);
+  RunAsAdministrators.Add(RunAsAdministrator);
   FileDropImage.Image.Tag := FileDropImage.Tag;
   TheIcon := TIcon.Create;
   try
@@ -253,7 +275,7 @@ begin
     Form2.edParam.Text := '';
     if Form2.ShowModal = mrOK then
     begin
-      AddApplication(Form2.edApp.Text, Form2.edParam.Text);
+      AddApplication(Form2.edApp.Text, Form2.edParam.Text, Form2.cbRunAsAdmin.Checked);
       MyUpdateRegistry;
     end;
   end;
@@ -285,15 +307,23 @@ begin
 
   FileDropImage := (Sender as TImage).Parent as TFileDropImage;
   Index := Applications.IndexOfObject(FileDropImage);
-  ActivApp1.ExePath := Applications[Index] + ' ' + Parameters[Index];
-  SetCurrentDir(ExtractFileDir(Applications[Index]));
-  ActivApp1.ExecuteApp(Success);
-  if not Success then
+
+  if RunAsAdministrators[Index] then
   begin
-    ActivApp1.ExePath := '"' + Trim(ActivApp1.ExePath) + '"';
+    RunAsAdmin(Applications[Index], Parameters[Index]);
+  end
+  else
+  begin
+    ActivApp1.ExePath := Applications[Index] + ' ' + Parameters[Index];
+    SetCurrentDir(ExtractFileDir(Applications[Index]));
     ActivApp1.ExecuteApp(Success);
+    if not Success then
+    begin
+      ActivApp1.ExePath := '"' + Trim(ActivApp1.ExePath) + '"';
+      ActivApp1.ExecuteApp(Success);
+    end;
+    if not Success then ShowMessage('Failed');
   end;
-  if not Success then ShowMessage('Failed');
 end;
 
 
@@ -402,6 +432,7 @@ begin
           begin
             Reg.WriteString('', ProgKey + IntToStr(Index), Applications[Index]);
             Reg.WriteString('', ParamKey + IntToStr(Index), Parameters[Index]);
+            Reg.WriteBool('', RunAsAdminstratorKey + IntToStr(Index), RunAsAdministrators[Index]);
           end;
         end;
       end;
@@ -452,6 +483,7 @@ begin
 //  Applications.SaveToFile(FileName);
   Applications.Free;
   Parameters.Free;
+  RunAsAdministrators.Free;
 end;
 
 procedure TForm1.FormCreate(Sender: TObject);
@@ -462,6 +494,7 @@ var
   Reg : TRegIniFile;
   Count : integer;
   AppString, ParamString : string;
+  RunAdmin: Boolean;
 begin
   Creating := True;
   //  Images := TList.Create;
@@ -469,8 +502,10 @@ begin
   try
     Applications.Free;
     Parameters.Free;
+    RunAsAdministrators.Free;
     Applications := TStringList.Create;
     Parameters := TStringList.Create;
+    RunAsAdministrators := TList<Boolean>.Create;
     if FileExists(FileName) then
     begin
       TempApplications.LoadFromFile(FileName);
@@ -485,7 +520,7 @@ begin
 
       for Index := 2 to TempApplications.Count -1 do
       begin
-        AddApplication(TempApplications[Index], '');
+        AddApplication(TempApplications[Index], '', False);
       end;
       DeleteFile( FileName);
     end
@@ -510,7 +545,8 @@ begin
             begin
               AppString := Reg.ReadString('', ProgKey + IntToStr(Index), '');
               ParamString := Reg.ReadString('', ParamKey + IntToStr(Index), '');
-              AddApplication(AppString, ParamString);
+              RunAdmin := Reg.ReadBool('', RunAsAdminstratorKey + IntToStr(Index), False);
+              AddApplication(AppString, ParamString, RunAdmin);
             end;
           end;
         end;
@@ -592,6 +628,7 @@ begin
   begin
     Applications.Exchange(PopUpMenu1.Tag, PopUpMenu1.Tag-1);
     Parameters.Exchange(PopUpMenu1.Tag, PopUpMenu1.Tag-1);
+    RunAsAdministrators.Exchange(PopUpMenu1.Tag, PopUpMenu1.Tag-1);
   end;
   ReassignTags;
   MyUpdateRegistry;
@@ -610,6 +647,7 @@ begin
   begin
     Applications.Exchange(PopUpMenu1.Tag, PopUpMenu1.Tag+1);
     Parameters.Exchange(PopUpMenu1.Tag, PopUpMenu1.Tag+1);
+    RunAsAdministrators.Exchange(PopUpMenu1.Tag, PopUpMenu1.Tag+1);
   end;
   ReassignTags;
   MyUpdateRegistry;
@@ -623,6 +661,7 @@ begin
   Image.Free;
   Applications.Delete(PopUpMenu1.Tag);
   Parameters.Delete(PopUpMenu1.Tag);
+  RunAsAdministrators.Delete(PopUpMenu1.Tag);
   ReassignTags;
   MyUpdateRegistry;
 end;
@@ -686,6 +725,7 @@ begin
   begin
     Form2.edApp.Text := Applications[PopUpMenu1.Tag];
     Form2.edParam.Text := Parameters[PopUpMenu1.Tag];
+    Form2.cbRunAsAdmin.Checked := RunAsAdministrators[PopUpMenu1.Tag];
     if Form2.ShowModal = mrOK then
     begin
       if Applications[PopUpMenu1.Tag] <> Form2.edApp.Text then
@@ -708,6 +748,7 @@ begin
 
       end;
       Parameters[PopUpMenu1.Tag] := Form2.edParam.Text;
+      RunAsAdministrators[PopUpMenu1.Tag] := Form2.cbRunAsAdmin.Checked;
     end;
   end;
   MyUpdateRegistry;
@@ -849,6 +890,7 @@ var
   AString: string;
   AnObject: TObject;
   Distance: integer;
+  ABool: Boolean;
 begin
   if PopUpMenu1.Tag > 4 then
   begin
@@ -869,6 +911,10 @@ begin
     AString := Parameters[PopUpMenu1.Tag];
     Parameters.Delete(PopUpMenu1.Tag);
     Parameters.Insert(PopUpMenu1.Tag-Distance, AString);
+
+    ABool := RunAsAdministrators[PopUpMenu1.Tag];
+    RunAsAdministrators.Delete(PopUpMenu1.Tag);
+    RunAsAdministrators.Insert(PopUpMenu1.Tag-Distance, ABool);
   end;
   ReassignTags;
   MyUpdateRegistry;
@@ -880,6 +926,7 @@ var
   AString: string;
   AnObject: TObject;
   Distance: integer;
+  ABool: Boolean;
 begin
   if PopUpMenu1.Tag < Applications.Count -5 then
   begin
@@ -900,6 +947,12 @@ begin
     AString := Parameters[PopUpMenu1.Tag];
     Parameters.Delete(PopUpMenu1.Tag);
     Parameters.Insert(PopUpMenu1.Tag+Distance, AString);
+
+    ABool := RunAsAdministrators[PopUpMenu1.Tag];
+    RunAsAdministrators.Delete(PopUpMenu1.Tag);
+    RunAsAdministrators.Insert(PopUpMenu1.Tag+Distance, ABool);
+
+
   end;
   ReassignTags;
   MyUpdateRegistry;

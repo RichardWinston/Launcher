@@ -16,6 +16,7 @@ type
     BitBtn2: TBitBtn;
     Button1: TButton;
     OpenDialog1: TOpenDialog;
+    cbRunAsAdmin: TCheckBox;
     procedure Button1Click(Sender: TObject);
   private
     { Private declarations }
