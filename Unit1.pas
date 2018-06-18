@@ -273,6 +273,7 @@ begin
   begin
     Form2.edApp.Text := OpenDialog1.FileName;
     Form2.edParam.Text := '';
+    Form2.cbRunAsAdmin.Checked := False;
     if Form2.ShowModal = mrOK then
     begin
       AddApplication(Form2.edApp.Text, Form2.edParam.Text, Form2.cbRunAsAdmin.Checked);
