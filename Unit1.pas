@@ -246,7 +246,10 @@ begin
     FileDropImage.Width := Image1.Width;
     FileDropImage.Height := Image1.Height;
 
-    DrawIconInImage(AFileName, FileDropImage.Image);
+    if TheIcon.Handle > 0 then
+    begin
+      DrawIconInImage(AFileName, FileDropImage.Image);
+    end;
 
 {    Rect.Left := 0;
     Rect.Top := 0;
